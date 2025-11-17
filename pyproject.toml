@@ -1,0 +1,25 @@
+[project]
+name = "trainer-test"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "rjerez1992",email = "rjerez1992@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mss>=9.0.1,<10.0.0",
+    "opencv-python>=4.10.0.0,<5.0.0",
+    "interception-python>=1.13.6,<2.0.0",
+    "playsound==1.2.2",
+]
+
+[tool.poetry]
+packages = [{include = "trainer_test", from = "src"}]
+
+[tool.poetry.scripts]
+trainer = "trainer_test.trainer:main"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
