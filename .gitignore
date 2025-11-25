@@ -205,3 +205,18 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Others
+LOOP.md
+image-find-test/
+vision_run/*
+!vision_run/
+screenshots/*
+!screenshots/
+vision/*
+!vision/
+!vision/character_needle.png
+!vision/dialog_needle.png
+!vision/inventory_needle.png
+!vision/ingame_needle.png
+!vision/character_needle.png

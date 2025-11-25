@@ -1,55 +1,63 @@
-# Trainer Test
+# Mu Online Trainer
 
-This repo bundles a handful of focused automation services driven by a single loop in `trainer.py`. Everything is built for advanced users who want full control without extra opinionated layers.
+Automated game state monitoring and Discord notifications for Mu Online. Uses image recognition and OCR to track character level, zen amounts, and game status, with automated health checks and milestone notifications.
 
 ### Libraries & Responsibilities
 
-- `interception-python` (pyinterception) – hardware-grade mouse/keyboard input (`mouse_service`, `keyboard_service`)
-- `ctypes` Win32 bindings – window discovery/focus (`window_service`)
-- `mss` – instant screenshots (`screenshot_service`)
-- `opencv-python` – template matching, region cropping, debug overlays (`image_service`)
-- `playsound` – lightweight audio cues (`audio_service`)
+- `interception-python` – hardware-grade input control
+- `ctypes` Win32 – window management
+- `mss` – fast screenshots
+- `opencv-python` – image processing and template matching
+- `pytesseract` – OCR for level/zen reading
+- `playsound` – audio notifications
 
-Each service does one job:
+Core services handle specific tasks:
+- Game state detection (ingame, dialog, inventory, character menu)
+- OCR processing for level and zen amounts
+- Discord webhook notifications for milestones and errors
+- Automated monitoring loops with health checks
 
-- `mouse_service`: `move_to/move_by/click/right_click/jitter/position`
-- `keyboard_service`: `press_key/tap/hold` (auto-captures devices once)
-- `window_service`: `find_window_info`, `focus_window`, `get_window_bounds`
-- `screenshot_service`: `capture_screenshot` (full screen or explicit region)
-- `image_service`: `crop_center_region`, `find_image`, `find_image_in_center_region`, `annotate_search_area`
-- `audio_service`: `play_audio`
+## Installation
 
-The current action loop behaves as follows:
+### Prerequisites
+- **Interception driver**: Install from [oblitum/Interception](https://github.com/oblitum/Interception) (Windows driver for hardware input)
+- **Tesseract OCR**: Install from [UB-Mannheim/tesseract](https://github.com/UB-Mannheim/tesseract/wiki) and ensure it's on PATH
 
-1. Wait 3 seconds after launch.
-2. Play `sounds/start.mp3`.
-X
-X
-5. Right-click 9 times, 0.75 s apart.
-6. Tap `Q`, wait 0.5 s, tap `W`.
-7. Sleep 6 seconds and repeat until stopped.
-
-To change behaviour you edit the constants or the loop body inside `trainer.py`. There are no enable/disable switches anymore—the script simply executes whatever you program in that loop.
+### Setup
+```bash
+poetry install
+```
 
 ## Usage
 
+Run the trainer:
 ```bash
-poetry install
-poetry run python -m trainer_test.trainer
+poetry run trainer
 ```
 
-Tips:
+Test modes (run individually):
+```bash
+poetry run trainer --test-notification     # Test Discord notifications
+poetry run trainer --test-get-level        # Test level OCR
+poetry run trainer --test-zen             # Test zen OCR
+poetry run trainer --test-dialog          # Test dialog detection
+poetry run trainer --test-ingame          # Test ingame detection
+poetry run trainer --test-inventory       # Test inventory detection
+poetry run trainer --test-character       # Test character menu detection
+poetry run trainer --test-image-find      # Test image matching
+```
 
-- Install the Interception driver beforehand (pyinterception only provides the bindings).
-- Update `FOCUS_WINDOW_SUBSTRING` so the trainer can focus the proper MU window each cycle.
-- Replace `sounds/start.mp3` if you want a different start cue.
-- Stop the trainer with `Ctrl+C`.
+### Configuration
+Edit constants in `trainer.py`:
+- `DISCORD_WEBHOOK_URL` – Your Discord webhook URL
+- `DISCORD_UID` – Your Discord user ID
+- `CHARACTER_NAME` – Character name for notifications
+- `FOCUS_WINDOW_SUBSTRING` – Window title substring to focus
+- Region offsets and sizes for your client resolution
 
-### Required Assets / Config
-
-- `sounds/start.mp3` and `sounds/reward.mp3`
-- `@image-find/needle.png` (fallback `jewel_tag.png`) for runtime reward detection
-- `image-find-test/needle.png` and `image-find-test/screenshot.png` for `--test-image-find`
-- `screenshots/` (auto-created) stores the latest screenshot, region crop, and marked versions
-- Edit the constants at the top of `trainer.py` (delays, window name, search region sizes) to match your client.
+### Required Assets
+- `sounds/start.mp3`, `sounds/reward.mp3` – Audio cues
+- `image-find/needle.png` – Reward detection template
+- `vision/` directory – Screenshots and needle images for game state detection
+- `vision_run/` (auto-created) – Runtime debug outputs
 
