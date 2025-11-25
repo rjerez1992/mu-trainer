@@ -34,6 +34,13 @@ SetForegroundWindow = user32.SetForegroundWindow
 SetForegroundWindow.argtypes = [ctypes.c_void_p]
 SetForegroundWindow.restype = ctypes.c_bool
 
+GetSystemMetrics = user32.GetSystemMetrics
+GetSystemMetrics.argtypes = [ctypes.c_int]
+GetSystemMetrics.restype = ctypes.c_int
+
+SM_CXSCREEN = 0
+SM_CYSCREEN = 1
+
 
 @dataclass(frozen=True)
 class WindowInfo:
@@ -85,13 +92,30 @@ def _get_window_bounds(hwnd: int) -> tuple[int, int, int, int]:
     return rect[0], rect[1], rect[2], rect[3]
 
 
-def find_window_info(partial_title: str) -> Optional[WindowInfo]:
-    """Return the first visible window whose title contains ``partial_title`` (case-insensitive)."""
+def find_window_info(
+    partial_title: str,
+    *,
+    log_missing: bool = True,
+    match_mode: str = "substring",
+) -> Optional[WindowInfo]:
+    """Return the first visible window matching ``partial_title`` (case-insensitive).
+
+    match_mode:
+        - "substring": title contains the partial text (default)
+        - "prefix": title starts with the partial text
+    """
 
     if not partial_title:
         raise ValueError("partial_title must be a non-empty string")
 
-    LOGGER.debug("Searching for window containing '%s'...", partial_title)
+    if match_mode not in {"substring", "prefix"}:
+        raise ValueError("match_mode must be either 'substring' or 'prefix'")
+
+    LOGGER.debug(
+        "Searching for window with %s match on '%s'...",
+        "prefix" if match_mode == "prefix" else "substring",
+        partial_title,
+    )
     search_term = partial_title.lower()
     found: list[WindowInfo] = []
 
@@ -103,7 +127,13 @@ def find_window_info(partial_title: str) -> Optional[WindowInfo]:
         if not title:
             return True
 
-        if search_term in title.lower():
+        haystack = title.lower()
+        if (
+            match_mode == "substring"
+            and search_term in haystack
+            or match_mode == "prefix"
+            and haystack.startswith(search_term)
+        ):
             left, top, right, bottom = _get_window_bounds(hwnd)
             info = WindowInfo(
                 handle=int(hwnd),
@@ -129,7 +159,8 @@ def find_window_info(partial_title: str) -> Optional[WindowInfo]:
     EnumWindows(EnumWindowsProc(_callback), 0)
 
     if not found:
-        LOGGER.warning("No window found containing '%s'.", partial_title)
+        if log_missing:
+            LOGGER.warning("No window found containing '%s'.", partial_title)
         return None
 
     return found[0]
@@ -147,5 +178,18 @@ def get_window_bounds(hwnd: int) -> tuple[int, int, int, int]:
     return _get_window_bounds(hwnd)
 
 
-__all__ = ["WindowInfo", "find_window_info", "focus_window", "get_window_bounds"]
+def get_primary_screen_size() -> tuple[int, int]:
+    """Return the primary screen width and height."""
+    width = max(0, GetSystemMetrics(SM_CXSCREEN))
+    height = max(0, GetSystemMetrics(SM_CYSCREEN))
+    return width, height
+
+
+__all__ = [
+    "WindowInfo",
+    "find_window_info",
+    "focus_window",
+    "get_window_bounds",
+    "get_primary_screen_size",
+]
 

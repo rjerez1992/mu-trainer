@@ -19,7 +19,7 @@ from .keyboard_service import press_key, tap
 from .mouse_service import jitter, right_click
 from .screenshot_service import capture_screenshot
 from .notificator_service import send_discord_notification
-from .window_service import find_window_info, focus_window
+from .window_service import WindowInfo, find_window_info, focus_window, get_primary_screen_size
 
 LOGGER = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ ZEN_MAX_ATTEMPTS = 3
 ZEN_THRESHOLD_INFO = 1_900_000_000
 
 LOG_LEVEL = "INFO"
-FOCUS_WINDOW_SUBSTRING = "99B"
+FOCUS_WINDOW_SUBSTRING = "PREFIX1"
 FOCUS_EACH_CYCLE = True
 START_DELAY_SECONDS = 3.0
 RIGHT_CLICK_COUNT = 24
@@ -175,6 +175,15 @@ MOUSE_JITTER_STEPS = 2
 REWARD_KEY = "space"
 REWARD_KEY_REPEAT = 4
 REWARD_KEY_INTERVAL = 0.5
+
+WINDOW_BASE_WIDTH = 1926
+WINDOW_BASE_HEIGHT = 1109
+SCALE_OFFSETS = True
+
+WINDOW_TITLE_PREFIXES = ("PREFIX1", "PREFIX2")
+
+_offset_scale_x = 1.0
+_offset_scale_y = 1.0
 
 
 @dataclass(frozen=True)
@@ -279,6 +288,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="OCR the zen amount from the inventory screenshot.",
     )
+    parser.add_argument(
+        "--test-screen-size",
+        action="store_true",
+        help="Print the primary screen size and MU window bounds.",
+    )
     return parser.parse_args(argv)
 
 
@@ -303,6 +317,83 @@ def _focus_target(log_missing: bool = True) -> None:
         LOGGER.debug("Focused window '%s' (%s)", info.title, hex(info.handle))
     else:
         LOGGER.warning("Failed to focus window '%s' (%s)", info.title, hex(info.handle))
+
+
+def _find_mu_window_info() -> WindowInfo | None:
+    for prefix in WINDOW_TITLE_PREFIXES:
+        info = find_window_info(prefix, log_missing=False, match_mode="prefix")
+        if info:
+            return info
+
+    LOGGER.warning(
+        "No window found matching any of the prefixes: %s",
+        ", ".join(WINDOW_TITLE_PREFIXES),
+    )
+    return None
+
+
+def _scale_offset_value(offset: int, scale: float) -> int:
+    if not SCALE_OFFSETS or offset == 0:
+        return offset
+    if scale == 1.0:
+        return offset
+    return int(round(offset * scale))
+
+
+def _scale_offsets(offset_x: int, offset_y: int) -> tuple[int, int]:
+    if not SCALE_OFFSETS:
+        return offset_x, offset_y
+    return (
+        _scale_offset_value(offset_x, _offset_scale_x),
+        _scale_offset_value(offset_y, _offset_scale_y),
+    )
+
+
+def _scale_dimension(value: int, scale: float) -> int:
+    if not SCALE_OFFSETS or value <= 0:
+        return value
+    if scale == 1.0:
+        return value
+    scaled = int(round(value * scale))
+    return max(1, scaled)
+
+
+def _scale_region_size(width: int, height: int) -> tuple[int, int]:
+    if not SCALE_OFFSETS:
+        return width, height
+    return _scale_dimension(width, _offset_scale_x), _scale_dimension(height, _offset_scale_y)
+
+
+def _initialize_offset_scaling() -> None:
+    if not SCALE_OFFSETS:
+        return
+
+    window_info = _find_mu_window_info()
+    if not window_info:
+        LOGGER.warning("SCALE_OFFSETS is enabled but no MU window was detected; using base offsets.")
+        return
+
+    if WINDOW_BASE_WIDTH <= 0 or WINDOW_BASE_HEIGHT <= 0:
+        LOGGER.error("Invalid WINDOW_BASE dimensions (%d x %d); cannot scale offsets.", WINDOW_BASE_WIDTH, WINDOW_BASE_HEIGHT)
+        return
+
+    if window_info.width <= 0 or window_info.height <= 0:
+        LOGGER.warning("Detected MU window has non-positive dimensions; skipping offset scaling.")
+        return
+
+    global _offset_scale_x, _offset_scale_y
+    _offset_scale_x = window_info.width / WINDOW_BASE_WIDTH
+    _offset_scale_y = window_info.height / WINDOW_BASE_HEIGHT
+
+    LOGGER.info(
+        "Offset scaling factors initialized: scale_x=%.3f scale_y=%.3f (window=%dx%d base=%dx%d)",
+        _offset_scale_x,
+        _offset_scale_y,
+        window_info.width,
+        window_info.height,
+        WINDOW_BASE_WIDTH,
+        WINDOW_BASE_HEIGHT,
+    )
 
 
 def _perform_right_clicks(stop_event: threading.Event) -> bool:
@@ -489,13 +580,15 @@ def _run_centered_search_runtime(
         return False, None, None
 
     height, width = image.shape[:2]
+    offset_x, offset_y = _scale_offsets(config.offset_x, config.offset_y)
+    region_width, region_height = _scale_region_size(config.region_width, config.region_height)
     left, top, right, bottom = _calculate_centered_region(
         width,
         height,
-        config.region_width,
-        config.region_height,
-        config.offset_x,
-        config.offset_y,
+        region_width,
+        region_height,
+        offset_x,
+        offset_y,
     )
 
     if left == right or top == bottom:
@@ -819,13 +912,15 @@ def _perform_level_ocr_from_screenshot(
         return None
 
     height, width = image.shape[:2]
+    offset_x, offset_y = _scale_offsets(LEVEL_OFFSET_X, LEVEL_OFFSET_Y)
+    region_width, region_height = _scale_region_size(LEVEL_BOX_WIDTH, LEVEL_BOX_HEIGHT)
     left, top, right, bottom = _calculate_centered_region(
         width,
         height,
-        LEVEL_BOX_WIDTH,
-        LEVEL_BOX_HEIGHT,
-        LEVEL_OFFSET_X,
-        LEVEL_OFFSET_Y,
+        region_width,
+        region_height,
+        offset_x,
+        offset_y,
     )
 
     if left == right or top == bottom:
@@ -906,13 +1001,15 @@ def _perform_zen_ocr_from_screenshot(
         return None
 
     height, width = image.shape[:2]
+    offset_x, offset_y = _scale_offsets(ZEN_OFFSET_X, ZEN_OFFSET_Y)
+    region_width, region_height = _scale_region_size(ZEN_REGION_WIDTH, ZEN_REGION_HEIGHT)
     left, top, right, bottom = _calculate_centered_region(
         width,
         height,
-        ZEN_REGION_WIDTH,
-        ZEN_REGION_HEIGHT,
-        ZEN_OFFSET_X,
-        ZEN_OFFSET_Y,
+        region_width,
+        region_height,
+        offset_x,
+        offset_y,
     )
 
     if left == right or top == bottom:
@@ -1180,6 +1277,35 @@ def _run_test_zen() -> int:
     return 0
 
 
+def _run_test_screen_size() -> int:
+    LOGGER.info("Running screen size diagnostic.")
+    width, height = get_primary_screen_size()
+    print(f"Primary screen size: {width}x{height}")
+    LOGGER.info("Primary screen dimensions: %dx%d", width, height)
+
+    window_info = _find_mu_window_info()
+    if window_info is None:
+        print("Unable to find an PREFIX window. Is the game client open?")
+        return 1
+
+    print(
+        f"Window '{window_info.title}' "
+        f"position=({window_info.left}, {window_info.top}) "
+        f"size={window_info.width}x{window_info.height}"
+    )
+    LOGGER.info(
+        "Window '%s' bounds=(%d,%d,%d,%d) size=%dx%d",
+        window_info.title,
+        window_info.left,
+        window_info.top,
+        window_info.right,
+        window_info.bottom,
+        window_info.width,
+        window_info.height,
+    )
+    return 0
+
+
 def _enter_running_state(stop_event: threading.Event) -> bool:
     LOGGER.info("Entering STARTING state.")
     for attempt in range(STARTING_MAX_ATTEMPTS):
@@ -1403,6 +1529,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if getattr(args, "test_zen", False):
         return _run_test_zen()
+
+    if getattr(args, "test_screen_size", False):
+        return _run_test_screen_size()
+
+    _initialize_offset_scaling()
 
     stop_event = threading.Event()
     _register_signal_handlers(stop_event)
